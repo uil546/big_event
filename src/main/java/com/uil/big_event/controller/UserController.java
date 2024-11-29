@@ -9,6 +9,8 @@ import com.uil.big_event.utils.ThreadLocalUtil;
 import jakarta.validation.constraints.Pattern;
 import org.hibernate.validator.constraints.URL;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.stereotype.Controller;
 import org.springframework.util.StringUtils;
 import org.springframework.validation.annotation.Validated;
@@ -16,6 +18,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 @RestController
 @RequestMapping("/user")
@@ -23,6 +26,8 @@ import java.util.Map;
 public class UserController {
     @Autowired
     private UserService userService;
+    @Autowired
+    private StringRedisTemplate stringRedisTemplate;
 
     @PostMapping("/register")//搞清楚Post,Get和Put的差别
     public Result<String> register(@Pattern(regexp = "^\\S{5,16}$") String username, @Pattern(regexp = "^\\S{5,16}$") String password) {
@@ -47,6 +52,8 @@ public class UserController {
             claims.put("id",user.getId());
             claims.put("username",user.getUsername());
             String token = JwtUtil.genToken(claims);
+            ValueOperations<String, String> ops = stringRedisTemplate.opsForValue();
+            ops.set(token,token,12, TimeUnit.HOURS);//将令牌存入redis
             return Result.success(token);
         }
 
@@ -75,7 +82,7 @@ public class UserController {
     }
 
     @PatchMapping("/updatePwd")
-    public Result<String> updatePwd(@RequestBody Map<String,String> params){
+    public Result<String> updatePwd(@RequestBody Map<String,String> params,@RequestHeader("Authorization") String token){
         String oldPwd = params.get("old_pwd");
         String newPwd = params.get("new_pwd");
         String rePwd = params.get("re_pwd");
@@ -93,7 +100,9 @@ public class UserController {
             return Result.error("确认密码与新密码不一致");
         }
 
-        userService.updatePwd(newPwd);
+        userService.updatePwd(newPwd);//调用密码修改服务
+        ValueOperations<String, String> ops = stringRedisTemplate.opsForValue();
+        ops.getOperations().delete(token);//删除使用原密码登录的token
         return Result.success();
     }
 }
